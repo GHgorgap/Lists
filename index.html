@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Λίστες</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Λίστες">
+<meta name="theme-color" content="#FAEEDA">
+<link rel="apple-touch-icon" href="icon.png">
+<!--
+ΧΑΡΤΗΣ ΕΦΑΡΜΟΓΗΣ «Λίστες» (για μελλοντικές αλλαγές)
+Φιλοξενία: GitHub Pages (repo GHgorgap/Lists). Βάση: Supabase project «Constructions App», πίνακες lst_* (ξεχωριστοί).
+Link: https://ghgorgap.github.io/Lists/#<ΜΥΣΤΙΚΟΣ ΚΩΔΙΚΟΣ>. Ο κωδικός ΔΕΝ υπάρχει στον κώδικα· μόνο στο link (κρατιέται και στο localStorage).
+Βάση (schema v1): lst_spaces(secret) · lst_lists(id,space,name,bg,ord) · lst_items(id,space,list_id,text,key,done,ord)
+  · lst_dict(space,list_id,key,text) PK(list_id,key) = καμία διπλοεγγραφή · lst_errors(at,where_,msg)
+  Οι πίνακες είναι κλειστοί (RLS). Πρόσβαση μόνο μέσω συναρτήσεων rpc lst_* που ελέγχουν τον κωδικό.
+  key = κανονικοποιημένο κείμενο (χωρίς τόνους/κεφαλαία, ς→σ).
+Συγχρονισμός: lst_state κάθε 3" όταν η εφαρμογή είναι ανοιχτή + αμέσως στο άνοιγμα. Ping κάθε 3 μέρες από GitHub Actions (keepalive.yml).
+Κώδικας: api() κλήσεις · pull() συγχρονισμός · renderHome/renderList/renderDict · dragify ταξινόμηση · menu «…».
+Εκδόσεις: v2.0 (2026-11-24) μεταφορά από claude.ai σε GitHub Pages + Supabase (ίδια λειτουργία με v1.6).
+-->
+<style>
+:root{color-scheme:light;--ink:#2C2C2A;--mut:#888780;--line:rgba(0,0,0,.10);--red:#E24B4A;--sheet:#F1EFE8;--fs:19px}
+*{box-sizing:border-box;min-width:0;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;position:fixed;inset:0;width:100%;overscroll-behavior:none;background:#fff;color:var(--ink);font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+#app{display:flex;flex-direction:column;height:var(--vh,100dvh);max-width:640px;margin:0 auto;transition:background .2s}
+header{flex:none;display:flex;align-items:center;gap:4px;padding:6px 6px;padding-top:max(6px,env(safe-area-inset-top));background:rgba(255,255,255,.55);border-bottom:.5px solid var(--line)}
+header h1{flex:1;margin:0;font-size:18px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{width:44px;height:44px;border:0;background:none;font-size:22px;color:var(--ink);border-radius:10px;display:grid;place-items:center;cursor:pointer}
+.ib:active{background:rgba(0,0,0,.06)}
+.ib svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.row{display:flex;align-items:center;padding:1px 6px 1px 14px;font-size:var(--fs);line-height:1.35;user-select:none;-webkit-user-select:none;cursor:pointer;min-height:34px}
+.row .t{flex:1;padding:3px 0;overflow-wrap:anywhere}
+.done .t{text-decoration:line-through;text-decoration-color:var(--red);text-decoration-thickness:2px}
+.hdl{width:40px;height:32px;display:grid;place-items:center;color:#B4B2A9;touch-action:none;cursor:grab}
+.hdl svg{width:22px;height:22px;stroke:currentColor;stroke-width:1.6}
+.drag{background:rgba(255,255,255,.7);box-shadow:0 4px 14px rgba(0,0,0,.15)}
+.home .row{border-bottom:.5px solid var(--line);min-height:50px}
+.sw{width:14px;height:14px;border-radius:4px;margin-right:10px;border:.5px solid rgba(0,0,0,.15)}
+.cnt{color:var(--mut);font-size:15px;padding:0 10px}
+.empty{padding:28px 18px;color:var(--mut);font-size:16px;line-height:1.5}
+#sheet{flex:none;background:var(--sheet);padding:6px 8px;display:flex;flex-direction:column;border-bottom:.5px solid var(--line)}
+.irow{display:flex;gap:6px;align-items:center}
+#grab{flex:none;background:#fff;border-radius:8px}
+#sheet.open ~ main{display:none}
+.inp{width:100%;height:44px;border:0;border-radius:8px;padding:0 12px;font-size:17px;background:#fff;color:var(--ink);outline:none}
+.inp:focus{box-shadow:0 0 0 2px #85B7EB}
+#dictWrap{position:relative;display:none;margin-top:6px;background:#fff;border-radius:8px;overflow:hidden}
+#sheet.open #dictWrap,#sheet.sugg #dictWrap{display:block}
+#dict{max-height:calc(var(--vh,100dvh) - 150px);overflow-y:auto;padding-right:22px}
+#sheet.sugg #dict{max-height:none;padding-right:0}
+.d{display:flex;align-items:center;border-bottom:.5px solid #eee;cursor:pointer}
+.d .c{flex:1;padding:9px 12px;font-size:18px}
+.d.in .c{color:#B4B2A9}
+.d .x{flex:none;width:40px;height:40px;border:0;background:none;color:#B4B2A9;font-size:24px;line-height:1}
+.d.new .c{color:#185FA5}
+#idx{position:absolute;right:0;top:0;bottom:0;width:22px;display:flex;flex-direction:column;justify-content:space-around;align-items:center;font-size:11px;color:#185FA5;touch-action:none;user-select:none;padding:4px 0}
+#ov{position:fixed;inset:0;background:rgba(0,0,0,.3);display:none;align-items:flex-start;justify-content:center;padding:64px 12px;z-index:9}
+#ov.on{display:flex}
+.panel{background:#fff;border-radius:12px;width:100%;max-width:420px;overflow:hidden}
+.mi{display:flex;align-items:center;gap:10px;padding:13px 14px;border-bottom:.5px solid #eee;font-size:17px;cursor:pointer}
+.mi:last-child{border-bottom:0}
+.mi.red{color:#A32D2D}
+.cols{display:flex;gap:10px;padding:4px 14px 14px;flex-wrap:wrap}
+.col{width:34px;height:34px;border-radius:8px;border:.5px solid rgba(0,0,0,.15);cursor:pointer}
+.col.on{outline:2px solid #854F0B;outline-offset:2px}
+.btns{display:flex;gap:8px;padding:12px 14px}
+.btn{flex:1;height:44px;border-radius:8px;border:.5px solid rgba(0,0,0,.2);background:#fff;font-size:16px;color:var(--ink)}
+.btn.pri{background:#2C2C2A;color:#fff;border:0}
+.btn.dan{background:var(--red);color:#fff;border:0}
+.note{padding:12px 14px;font-size:15px;line-height:1.5;color:#444441}
+#toast{position:fixed;left:50%;top:64px;transform:translateX(-50%);background:#2C2C2A;color:#fff;border-radius:10px;padding:10px 14px;font-size:15px;display:none;align-items:center;gap:14px;z-index:10;max-width:92vw}
+#toast.on{display:flex}
+#toast button{background:none;border:0;color:#FAC775;font-size:15px;font-weight:600}
+#status{font-size:13px;color:var(--mut);text-align:center;padding:4px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="hd"></header>
+  <div id="sheet" style="display:none">
+    <div class="irow"><input id="in" class="inp" placeholder="Πρόσθεσε είδος…" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="false" enterkeyhint="done"><button id="grab" class="ib" aria-label="Λεξικό"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button></div>
+    <div id="dictWrap"><div id="dict"></div><div id="idx"></div></div>
+  </div>
+  <main id="main"><div id="status">Φόρτωση…</div></main>
+</div>
+<div id="ov"><div class="panel" id="panel"></div></div>
+<div id="toast"><span id="tmsg"></span><button id="tbtn">Αναίρεση</button></div>
+<script>
+{
+const SB_URL="https://yakggyatokcptxjycmew.supabase.co";
+const SB_KEY="sb_publishable_iOLAbYGGAL7Y-JD_3jdT6w_6Ci1_isi";
+const BGS=["#FAEEDA","#FFFFFF","#E1F5EE","#FBEAF0","#E6F1FB","#EAF3DE","#F1EFE8"];
+const GR="ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ".split("");
+const I={back:'<svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>',dots:'<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>',check:'<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>',plus:'<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',hdl:'<svg viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></svg>',down:'<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>'};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const norm=s=>String(s).normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/ς/g,"σ").replace(/\s+/g," ").trim();
+const uid=()=>crypto.randomUUID?crypto.randomUUID():"10000000-1000-4000-8000-100000000000".replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16));
+const S={lists:[],items:[],dict:[],cur:null,dragging:false,adding:false,pending:0,loaded:false};
+
+/* μυστικός κωδικός: από το link (#κωδικός) ή από την τελευταία φορά */
+let SPACE=(location.hash||"").replace(/^#/,"").trim();
+try{if(SPACE)localStorage.setItem("lst_space",SPACE);else SPACE=localStorage.getItem("lst_space")||""}catch(_){}
+if(SPACE&&!location.hash)history.replaceState(null,"","#"+SPACE);
+
+/* κλήσεις στη βάση */
+async function api(fn,args){
+  const r=await fetch(SB_URL+"/rest/v1/rpc/"+fn,{method:"POST",headers:{"apikey":SB_KEY,"Content-Type":"application/json"},body:JSON.stringify(Object.assign({p_space:SPACE},args||{}))});
+  if(!r.ok){const t=await r.text().catch(()=>"");const e=new Error(r.status+" "+t.slice(0,200));e.status=r.status;throw e}
+  const t=await r.text();return t?JSON.parse(t):null;
+}
+function logErr(where,e){console.error(where,e);toast("Δεν αποθηκεύτηκε. Δοκίμασε ξανά.");api("lst_log",{p_where:where,p_msg:String(e&&e.message||e)}).catch(()=>{})}
+async function W(where,fn,args){S.pending++;try{await api(fn,args)}catch(e){logErr(where,e)}finally{S.pending--;if(!S.pending)setTimeout(pull,300)}}
+
+let tUndo=null,tTimer=null;
+function toast(msg,undo){$("tmsg").textContent=msg;$("tbtn").style.display=undo?"":"none";tUndo=undo||null;$("toast").classList.add("on");clearTimeout(tTimer);tTimer=setTimeout(()=>$("toast").classList.remove("on"),undo?6000:3000)}
+$("tbtn").onclick=()=>{const u=tUndo;tUndo=null;$("toast").classList.remove("on");u&&u()};
+
+const listItems=id=>S.items.filter(x=>x.list===id).sort((a,b)=>a.ord-b.ord);
+const listDict=id=>S.dict.filter(x=>x.list===id).sort((a,b)=>a.key.localeCompare(b.key,"el"));
+
+/* συγχρονισμός */
+let sig="";
+async function pull(){
+  if(!SPACE||S.pending||S.dragging)return;
+  try{const st=await api("lst_state");if(S.pending||S.dragging)return;
+    const n=JSON.stringify(st);S.loaded=true;if(n===sig)return;sig=n;
+    S.lists=st.lists;S.items=st.items;S.dict=st.dict;
+    if(S.cur&&!S.lists.find(l=>l.id===S.cur))S.cur=null;render();
+  }catch(e){if(!S.loaded){$("main").innerHTML=`<div class="empty">${e.status===400?"Ο κωδικός στο link δεν είναι σωστός. Άνοιξε ξανά το link που σου στάλθηκε.":"Δεν απαντά η βάση. Έλεγξε τη σύνδεση."}</div>`}}
+}
+setInterval(()=>{if(!document.hidden)pull()},3000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)pull()});
+addEventListener("focus",pull);
+
+function open(id){S.cur=id;history.pushState({l:id},"","#"+SPACE);render();$("main").scrollTop=0}
+addEventListener("popstate",()=>{if(S.cur){S.cur=null;render()}});
+function render(){if(S.dragging)return;S.cur?renderList():renderHome()}
+
+function renderHome(){
+  document.body.style.background="#fff";$("app").style.background="#fff";$("sheet").style.display="none";if($("sheet").classList.contains("open"))setOpen(false);
+  $("hd").innerHTML=`<span class="ib"></span><h1>Λίστες</h1><button class="ib" id="addL" aria-label="Νέα λίστα">${I.plus}</button>`;
+  $("addL").onclick=()=>{S.adding=true;renderHome();$("newL").focus()};
+  const ls=[...S.lists].sort((a,b)=>a.ord-b.ord);
+  let h=S.adding?`<div class="row" style="padding:8px"><input id="newL" class="inp" style="background:#F1EFE8" placeholder="Όνομα λίστας, π.χ. Ψώνια ΑΒ" enterkeyhint="done"></div>`:"";
+  h+=ls.map(l=>`<div class="row" data-id="${esc(l.id)}"><span class="sw" style="background:${esc(l.bg||BGS[0])}"></span><span class="t">${esc(l.name)}</span><span class="cnt">${listItems(l.id).filter(x=>!x.done).length}</span></div>`).join("");
+  if(!ls.length&&!S.adding)h+=`<div class="empty">${S.loaded?"Ξεκίνα την πρώτη σου λίστα με το + πάνω δεξιά.":"Φόρτωση…"}</div>`;
+  $("main").className="home";$("main").innerHTML=h;
+  $("main").querySelectorAll(".row[data-id]").forEach(r=>r.onclick=()=>open(r.dataset.id));
+  const n=$("newL");if(n){n.onkeydown=e=>{if(e.key==="Enter"){const v=n.value.trim();S.adding=false;if(v)createList(v);else renderHome()}};n.onblur=()=>{if(!n.value.trim()){S.adding=false;setTimeout(renderHome,0)}}}
+}
+function createList(name){
+  const l={id:uid(),name,bg:BGS[0],ord:S.lists.reduce((m,x)=>Math.max(m,x.ord),0)+1};
+  S.lists.push(l);renderHome();W("createList","lst_list_save",{p_id:l.id,p_name:l.name,p_bg:l.bg,p_ord:l.ord});
+}
+const saveList=L=>W("saveList","lst_list_save",{p_id:L.id,p_name:L.name,p_bg:L.bg,p_ord:L.ord});
+const saveItem=(x,w)=>W(w||"saveItem","lst_item_save",{p_id:x.id,p_list:x.list,p_text:x.text,p_key:x.key,p_done:x.done,p_ord:x.ord});
+
+function renderList(){
+  const L=S.lists.find(l=>l.id===S.cur);if(!L){S.cur=null;renderHome();return}
+  document.body.style.background=L.bg||BGS[0];$("app").style.background=L.bg||BGS[0];$("sheet").style.display="";
+  inp.placeholder="Πρόσθεσε στο "+L.name+"…";
+  $("hd").innerHTML=`<button class="ib" id="bk" aria-label="Πίσω">${I.back}</button><button class="ib" id="mn" aria-label="Μενού">${I.dots}</button><h1>${esc(L.name)}</h1><span class="ib"></span><button class="ib" id="ck" aria-label="Σβήσε τα διαγραμμένα">${I.check}</button>`;
+  $("bk").onclick=()=>history.back();$("mn").onclick=()=>menu(L);$("ck").onclick=()=>clearDone(L.id);
+  const its=listItems(L.id);
+  $("main").className="";
+  $("main").innerHTML=its.length?its.map(x=>`<div class="row${x.done?" done":""}" data-id="${esc(x.id)}"><span class="t">${esc(x.text)}</span><span class="hdl" aria-label="Μετακίνηση">${I.hdl}</span></div>`).join(""):`<div class="empty">Η λίστα είναι άδεια. Γράψε κάτι πάνω ή άνοιξε το λεξικό με το ▾.</div>`;
+  $("main").querySelectorAll(".row").forEach(r=>{r.querySelector(".t").onclick=()=>toggle(r.dataset.id);dragify(r.querySelector(".hdl"),r)});
+  renderDict();
+}
+function toggle(id){const x=S.items.find(i=>i.id===id);if(!x)return;x.done=!x.done;render();saveItem(x,"toggle")}
+
+function clearDone(listId){
+  const gone=listItems(listId).filter(x=>x.done);if(!gone.length){toast("Δεν υπάρχουν διαγραμμένα.");return}
+  S.items=S.items.filter(x=>!gone.includes(x));render();
+  W("clearDone","lst_item_delete",{p_ids:gone.map(x=>x.id)});
+  toast(`Σβήστηκαν ${gone.length}`,()=>{for(const x of gone){S.items.push(x);saveItem(x,"undoClear")}render()});
+}
+
+function addItem(text){
+  text=text.trim();if(!text||!S.cur)return;text=text.charAt(0).toLocaleUpperCase("el")+text.slice(1);const key=norm(text);const L=S.cur;
+  const ex=listItems(L).find(x=>x.key===key);
+  if(ex){if(ex.done)toggle(ex.id);else toast("Υπάρχει ήδη στη λίστα.")}
+  else{const x={id:uid(),list:L,text,key,done:false,ord:listItems(L).reduce((m,y)=>Math.max(m,y.ord),0)+1};S.items.push(x);saveItem(x,"addItem")}
+  if(!S.dict.find(d=>d.list===L&&d.key===key)){S.dict.push({list:L,key,text});W("addDict","lst_dict_save",{p_list:L,p_key:key,p_text:text})}
+  render();
+}
+
+/* πεδίο, προτάσεις, λεξικό */
+const inp=$("in");
+inp.addEventListener("input",()=>{const v=inp.value,u=v.charAt(0).toLocaleUpperCase("el");if(v&&u!==v.charAt(0)){const s=inp.selectionStart,e=inp.selectionEnd;inp.value=u+v.slice(1);try{inp.setSelectionRange(s,e)}catch(_){}}renderDict()});
+inp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();const v=inp.value;inp.value="";addItem(v)}});
+function setOpen(on){$("sheet").classList.toggle("open",on);$("grab").innerHTML=on?'<span style="font-size:15px;font-weight:600;padding:0 6px">Τέλος</span>':I.down;$("grab").style.width=on?"auto":"";if(on){inp.value="";inp.blur();$("dict").scrollTop=0}renderDict()}
+$("grab").onclick=()=>setOpen(!$("sheet").classList.contains("open"));
+inp.addEventListener("focus",()=>{if($("sheet").classList.contains("open"))setOpen(false)});
+function renderDict(){
+  const q=norm(inp.value),sh=$("sheet"),open=sh.classList.contains("open");sh.classList.toggle("sugg",!!q&&!open);
+  if(!S.cur||(!q&&!open)){$("dict").innerHTML="";$("idx").innerHTML="";return}
+  const inList=new Set(listItems(S.cur).filter(x=>!x.done).map(x=>x.key));
+  let ds=listDict(S.cur);
+  if(q&&!open)ds=ds.filter(d=>d.key.includes(q)).sort((a,b)=>(b.key.startsWith(q)-a.key.startsWith(q))||a.key.localeCompare(b.key,"el")).slice(0,4);
+  let r=ds.map(d=>`<div class="d${inList.has(d.key)?" in":""}" data-k="${esc(d.key)}"><div class="c">${esc(d.text)}</div>${open?'<button class="x" aria-label="Σβήσε από το λεξικό">×</button>':""}</div>`).join("");
+  if(q&&!open&&!ds.some(d=>d.key===q))r=`<div class="d new" data-new="1"><div class="c">+ Πρόσθεσε «${esc(inp.value.trim())}»</div></div>`+r;
+  if(!r)r=open?`<div class="empty" style="padding:14px">Το λεξικό γεμίζει μόνο του όσο προσθέτεις είδη.</div>`:"";
+  $("dict").innerHTML=r;
+  $("idx").innerHTML=open?GR.map(g=>`<span data-g="${g}">${g}</span>`).join("")+`<span data-g="#">#</span>`:"";
+  $("dict").querySelectorAll(".d").forEach(row=>{
+    const x=row.querySelector(".x");if(x)x.onclick=e=>{e.stopPropagation();askDel(row.dataset.k)};
+    row.onclick=()=>{if(row.classList.contains("in"))return;const t=row.dataset.new?inp.value:row.querySelector(".c").textContent;if(!open)inp.value="";addItem(t);if(!open)inp.focus()};
+  });
+}
+function askDel(key){const d=S.dict.find(x=>x.list===S.cur&&x.key===key);if(!d)return;const inL=S.items.some(x=>x.list===d.list&&x.key===d.key);
+  $("panel").innerHTML=`<div class="note">Να σβηστεί το «${esc(d.text)}» από το λεξικό${inL?" και από τη λίστα":""};</div><div class="btns"><button class="btn" id="c0">Άκυρο</button><button class="btn dan" id="c1">Διαγραφή</button></div>`;
+  $("ov").classList.add("on");$("c0").onclick=close;$("c1").onclick=()=>{close();delDict(d)};
+}
+function delDict(d){
+  const its=S.items.filter(x=>x.list===d.list&&x.key===d.key);
+  S.dict=S.dict.filter(x=>x!==d);S.items=S.items.filter(x=>!its.includes(x));render();
+  W("delDict","lst_dict_delete",{p_list:d.list,p_key:d.key});
+  if(its.length)W("delDictItem","lst_item_delete",{p_ids:its.map(x=>x.id)});
+  toast(`Σβήστηκε «${d.text}»`+(its.length?" και από τη λίστα":""),()=>{
+    S.dict.push(d);W("undoDict","lst_dict_save",{p_list:d.list,p_key:d.key,p_text:d.text});
+    for(const x of its){S.items.push(x);saveItem(x,"undoDictItem")}render()});
+}
+function jump(e){const t=document.elementFromPoint(e.clientX,e.clientY);const g=t&&t.dataset&&t.dataset.g;if(!g)return;
+  const rows=[...$("dict").querySelectorAll(".d[data-k]")];
+  const hit=g==="#"?rows.find(r=>!/^[α-ω]/.test(r.dataset.k)):rows.find(r=>norm(r.dataset.k[0]||"")>=norm(g));
+  if(hit)$("dict").scrollTop=hit.offsetTop}
+$("idx").addEventListener("pointerdown",e=>{e.preventDefault();$("idx").setPointerCapture(e.pointerId);jump(e)});
+$("idx").addEventListener("pointermove",e=>{if(e.buttons||e.pointerType==="touch")jump(e)});
+
+/* ταξινόμηση με σύρσιμο */
+function dragify(h,row){
+  h.onpointerdown=e=>{e.preventDefault();h.setPointerCapture(e.pointerId);S.dragging=true;row.classList.add("drag")};
+  h.onpointermove=e=>{if(!S.dragging)return;const m=$("main");
+    const r=m.getBoundingClientRect();if(e.clientY<r.top+30)m.scrollTop-=8;else if(e.clientY>r.bottom-30)m.scrollTop+=8;
+    for(const o of m.querySelectorAll(".row")){if(o===row)continue;const b=o.getBoundingClientRect();
+      if(e.clientY>b.top&&e.clientY<b.bottom){m.insertBefore(row,e.clientY<b.top+b.height/2?o:o.nextSibling);break}}};
+  const end=()=>{if(!S.dragging)return;S.dragging=false;row.classList.remove("drag");
+    const ids=[...$("main").querySelectorAll(".row")].map(r=>r.dataset.id);const ch=[];
+    ids.forEach((id,i)=>{const x=S.items.find(y=>y.id===id);if(x&&x.ord!==i+1){x.ord=i+1;ch.push(x)}});
+    render();for(const x of ch)saveItem(x,"reorder")};
+  h.onpointerup=end;h.onpointercancel=end;
+}
+
+/* μενού «…» */
+function menu(L){
+  const p=$("panel");
+  p.innerHTML=`<div class="mi" id="m1">Μετονομασία</div><div class="mi" style="border:0;padding-bottom:6px">Φόντο</div><div class="cols">${BGS.map(c=>`<span class="col${c===(L.bg||BGS[0])?" on":""}" data-c="${c}" style="background:${c}"></span>`).join("")}</div>
+  <div class="mi" id="m2" style="border-top:.5px solid #eee">Κοινή χρήση</div><div class="mi red" id="m3">Διαγραφή λίστας</div><div class="mi" id="m0" style="justify-content:center;color:#5F5E5A">Κλείσιμο</div>`;
+  $("ov").classList.add("on");
+  p.querySelectorAll(".col").forEach(c=>c.onclick=()=>{L.bg=c.dataset.c;close();render();saveList(L)});
+  $("m0").onclick=close;
+  $("m1").onclick=()=>{p.innerHTML=`<div class="note">Νέο όνομα</div><div style="padding:0 14px"><input id="rn" class="inp" style="background:#F1EFE8"></div><div class="btns"><button class="btn" id="c0">Άκυρο</button><button class="btn pri" id="c1">Αποθήκευση</button></div>`;
+    const rn=$("rn");rn.value=L.name;rn.focus();rn.select();$("c0").onclick=close;
+    const ok=()=>{const v=rn.value.trim();close();if(v&&v!==L.name){L.name=v;render();saveList(L)}};
+    $("c1").onclick=ok;rn.onkeydown=e=>{if(e.key==="Enter")ok()}};
+  $("m2").onclick=()=>{const link=location.origin+location.pathname+"#"+SPACE;
+    p.innerHTML=`<div class="note">Στείλε αυτό το link στην Ελίζα. Όποιος έχει το link βλέπει και γράφει σε όλες τις λίστες.</div><div style="padding:0 14px"><input class="inp" id="lk" readonly style="background:#F1EFE8;font-size:14px"></div><div class="btns"><button class="btn" id="c0">Κλείσιμο</button><button class="btn pri" id="c1">${navigator.share?"Αποστολή":"Αντιγραφή"}</button></div>`;
+    $("lk").value=link;$("c0").onclick=close;
+    $("c1").onclick=async()=>{try{if(navigator.share)await navigator.share({title:"Λίστες",url:link});else{await navigator.clipboard.writeText(link);toast("Αντιγράφηκε")}}catch(_){ $("lk").select() }}};
+  $("m3").onclick=()=>{p.innerHTML=`<div class="note">Να διαγραφεί η λίστα «${esc(L.name)}» με όλα τα είδη και το λεξικό της;</div><div class="btns"><button class="btn" id="c0">Άκυρο</button><button class="btn dan" id="c1">Διαγραφή</button></div>`;
+    $("c0").onclick=close;$("c1").onclick=()=>{close();S.lists=S.lists.filter(l=>l!==L);S.items=S.items.filter(x=>x.list!==L.id);S.dict=S.dict.filter(x=>x.list!==L.id);S.cur=null;render();W("delList","lst_list_delete",{p_id:L.id})}};
+}
+function close(){$("ov").classList.remove("on")}
+$("ov").onclick=e=>{if(e.target===$("ov"))close()};
+
+/* έναρξη */
+if(!SPACE){$("hd").innerHTML=`<span class="ib"></span><h1>Λίστες</h1><span class="ib"></span>`;$("main").innerHTML=`<div class="empty">Άνοιξε την εφαρμογή από το link που σου στάλθηκε.</div>`}
+else{renderHome();pull()}
+}
+</script>
+</body>
+</html>

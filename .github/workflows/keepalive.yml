@@ -1,0 +1,25 @@
+# Κρατάει ξύπνια τη βάση Supabase (δωρεάν πλάνο: παύση μετά από 7 μέρες χωρίς κίνηση).
+# Κάθε 3 μέρες κάνει ένα μικρό ερώτημα. Μία φορά τον μήνα γράφει και ένα αρχείο, ώστε το GitHub να μην σταματήσει το πρόγραμμα (60 μέρες χωρίς αλλαγές).
+name: keepalive
+on:
+  schedule:
+    - cron: "17 6 */3 * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        run: |
+          curl -sf -X POST "https://yakggyatokcptxjycmew.supabase.co/rest/v1/rpc/lst_ping" \
+            -H "apikey: sb_publishable_iOLAbYGGAL7Y-JD_3jdT6w_6Ci1_isi" -H "Content-Type: application/json" -d '{}'
+      - uses: actions/checkout@v4
+      - name: Monthly heartbeat commit
+        run: |
+          if [ "$(date +%d)" -le "03" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            date -u +%Y-%m-%dT%H:%MZ > .keepalive
+            git config user.name "keepalive-bot"; git config user.email "keepalive@users.noreply.github.com"
+            git add .keepalive && git commit -m "keepalive" && git push || true
+          fi
