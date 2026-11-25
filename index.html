@@ -26,6 +26,7 @@ Link: https://ghgorgap.github.io/Lists/#<ΜΥΣΤΙΚΟΣ ΚΩΔΙΚΟΣ>. Ο κ
   Link πλέον ?k=κωδικός (κρατιέται στο εικονίδιο Αφετηρίας). Αποστολή: edge function lst-push + pg_cron «lst-push-every-minute».
   Πίνακες: lst_subs (συσκευές), lst_mutes, lst_events (ουρά). Service worker: sw.js. Manifest: manifest.json.
   v2.2 (2026-11-25) χωρίς ταξινόμηση με σύρσιμο· διαγραμμένα στο τέλος· ξεδιαγραμμένο → τελευταίο από τα αδιάγραφα.
+  v2.2.1 αυτόματη ενημέρωση: σε κάθε νέα έκδοση ΑΛΛΑΖΕΙΣ ΚΑΙ ΤΑ ΔΥΟ: APP_VERSION εδώ και version.json.
 -->
 <style>
 :root{color-scheme:light;--ink:#2C2C2A;--mut:#888780;--line:rgba(0,0,0,.10);--red:#E24B4A;--sheet:#F1EFE8;--fs:19px}
@@ -97,6 +98,12 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
 <div id="toast"><span id="tmsg"></span><button id="tbtn">Αναίρεση</button></div>
 <script>
 {
+const APP_VERSION="2.2.1";
+/* αυτόματη ενημέρωση: αν το version.json λέει νεότερη έκδοση, ξαναφορτώνει (μία φορά) */
+function checkUpdate(){fetch("version.json?t="+Date.now(),{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{
+  if(!j||j.v===APP_VERSION)return;let k="";try{k=sessionStorage.getItem("lst_upd")}catch(_){}
+  if(k===j.v)return;try{sessionStorage.setItem("lst_upd",j.v)}catch(_){}location.reload()}).catch(()=>{})}
+checkUpdate();document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkUpdate()});
 const SB_URL="https://yakggyatokcptxjycmew.supabase.co";
 const SB_KEY="sb_publishable_iOLAbYGGAL7Y-JD_3jdT6w_6Ci1_isi";
 const BGS=["#FAEEDA","#FFFFFF","#E1F5EE","#FBEAF0","#E6F1FB","#EAF3DE","#F1EFE8"];
