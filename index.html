@@ -26,6 +26,7 @@ Link: https://ghgorgap.github.io/Lists/#<ΜΥΣΤΙΚΟΣ ΚΩΔΙΚΟΣ>. Ο κ
   Link πλέον ?k=κωδικός (κρατιέται στο εικονίδιο Αφετηρίας). Αποστολή: edge function lst-push + pg_cron «lst-push-every-minute».
   Πίνακες: lst_subs (συσκευές), lst_mutes, lst_events (ουρά). Service worker: sw.js. Manifest: manifest.json.
   v2.2 (2026-11-25) χωρίς ταξινόμηση με σύρσιμο· διαγραμμένα στο τέλος· ξεδιαγραμμένο → τελευταίο από τα αδιάγραφα.
+  v2.3 «Σειρά λιστών» στην αρχική (κουμπί κάτω, λαβές μόνο σε αυτή τη λειτουργία, SortableJS 1.15.2 από cdnjs).
   v2.2.1 αυτόματη ενημέρωση: σε κάθε νέα έκδοση ΑΛΛΑΖΕΙΣ ΚΑΙ ΤΑ ΔΥΟ: APP_VERSION εδώ και version.json.
 -->
 <style>
@@ -98,7 +99,7 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
 <div id="toast"><span id="tmsg"></span><button id="tbtn">Αναίρεση</button></div>
 <script>
 {
-const APP_VERSION="2.2.1";
+const APP_VERSION="2.3";
 /* αυτόματη ενημέρωση: αν το version.json λέει νεότερη έκδοση, ξαναφορτώνει (μία φορά) */
 function checkUpdate(){fetch("version.json?t="+Date.now(),{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{
   if(!j||j.v===APP_VERSION)return;let k="";try{k=sessionStorage.getItem("lst_upd")}catch(_){}
@@ -172,11 +173,25 @@ function renderHome(){
   $("addL").onclick=()=>{S.adding=true;renderHome();$("newL").focus()};$("bell").onclick=notifPanel;
   const ls=[...S.lists].sort((a,b)=>a.ord-b.ord);
   let h=S.adding?`<div class="row" style="padding:8px"><input id="newL" class="inp" style="background:#F1EFE8" placeholder="Όνομα λίστας, π.χ. Ψώνια ΑΒ" enterkeyhint="done"></div>`:"";
-  h+=ls.map(l=>`<div class="row" data-id="${esc(l.id)}"><span class="sw" style="background:${esc(l.bg||BGS[0])}"></span><span class="t">${esc(l.name)}</span><span class="cnt">${listItems(l.id).filter(x=>!x.done).length}</span></div>`).join("");
+  h+=`<div id="lsts">`+ls.map(l=>`<div class="row" data-id="${esc(l.id)}"><span class="sw" style="background:${esc(l.bg||BGS[0])}"></span><span class="t">${esc(l.name)}</span>${S.arrange?`<span class="hdl" aria-label="Μετακίνηση">${I.hdl}</span>`:`<span class="cnt">${listItems(l.id).filter(x=>!x.done).length}</span>`}</div>`).join("")+`</div>`;
   if(!ls.length&&!S.adding)h+=`<div class="empty">${S.loaded?"Ξεκίνα την πρώτη σου λίστα με το + πάνω δεξιά.":"Φόρτωση…"}</div>`;
+  if(ls.length>1&&!S.adding)h+=`<div style="text-align:center;padding:18px"><button class="btn${S.arrange?" pri":""}" id="arr" style="flex:none;padding:0 22px">${S.arrange?"Τέλος":"Σειρά λιστών"}</button></div>`;
   $("main").className="home";$("main").innerHTML=h;
-  $("main").querySelectorAll(".row[data-id]").forEach(r=>r.onclick=()=>open(r.dataset.id));
+  if(S.arrange)$("hd").innerHTML=`<span class="ib"></span><h1>Σύρε για σειρά</h1><span class="ib"></span>`;
+  else $("main").querySelectorAll(".row[data-id]").forEach(r=>r.onclick=()=>open(r.dataset.id));
+  if($("arr"))$("arr").onclick=()=>S.arrange?endArrange():startArrange();
+  if(S.arrange)sortable();
   const n=$("newL");if(n){n.onkeydown=e=>{if(e.key==="Enter"){const v=n.value.trim();S.adding=false;if(v)createList(v);else renderHome()}};n.onblur=()=>{if(!n.value.trim()){S.adding=false;setTimeout(renderHome,0)}}}
+}
+/* σειρά λιστών: μόνο σε «Σειρά λιστών» (αλλιώς δεν υπάρχει λαβή). SortableJS για σωστό σύρσιμο στο iPhone. */
+let sortLib=null;
+function loadSortable(){return sortLib||(sortLib=new Promise((ok,no)=>{if(window.Sortable)return ok();const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js";s.onload=ok;s.onerror=no;document.head.appendChild(s)}))}
+function startArrange(){S.arrange=true;S.dragging=false;renderHome();S.dragging=true}
+function sortable(){loadSortable().then(()=>{const el=$("lsts");if(el&&S.arrange)new Sortable(el,{handle:".hdl",animation:150,forceFallback:true,fallbackTolerance:3})}).catch(e=>{logErr("sortable",e);toast("Δεν φόρτωσε η ταξινόμηση. Δοκίμασε ξανά.")})}
+function endArrange(){
+  const ids=[...document.querySelectorAll("#lsts .row")].map(r=>r.dataset.id);const ch=[];
+  ids.forEach((id,i)=>{const l=S.lists.find(x=>x.id===id);if(l&&l.ord!==i+1){l.ord=i+1;ch.push(l)}});
+  S.arrange=false;S.dragging=false;renderHome();for(const l of ch)saveList(l);
 }
 function createList(name){
   const l={id:uid(),name,bg:BGS[0],ord:S.lists.reduce((m,x)=>Math.max(m,x.ord),0)+1};
