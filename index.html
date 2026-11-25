@@ -19,12 +19,13 @@ Link: https://ghgorgap.github.io/Lists/#<ΜΥΣΤΙΚΟΣ ΚΩΔΙΚΟΣ>. Ο κ
   Οι πίνακες είναι κλειστοί (RLS). Πρόσβαση μόνο μέσω συναρτήσεων rpc lst_* που ελέγχουν τον κωδικό.
   key = κανονικοποιημένο κείμενο (χωρίς τόνους/κεφαλαία, ς→σ).
 Συγχρονισμός: lst_state κάθε 3" όταν η εφαρμογή είναι ανοιχτή + αμέσως στο άνοιγμα. Ping κάθε 3 μέρες από GitHub Actions (keepalive.yml).
-Κώδικας: api() κλήσεις · pull() συγχρονισμός · renderHome/renderList/renderDict · dragify ταξινόμηση · menu «…».
+Κώδικας: api() κλήσεις · pull() συγχρονισμός · renderHome/renderList/renderDict · toggle() σειρά · menu «…».
 Εκδόσεις: v2.0 (2026-11-24) μεταφορά από claude.ai σε GitHub Pages + Supabase (ίδια λειτουργία με v1.6).
   v2.1 (2026-11-25) ειδοποιήσεις: «ποιος είμαι» ανά συσκευή (localStorage lst_me), 🔔 στην αρχική, 🛒 «Πάω για ψώνια»,
   «Τα ψώνια έγιναν» (μετά το ✓, 6,5" για αναίρεση), δέσμη προσθηκών (5' ησυχία ή κλείσιμο εφαρμογής), σίγαση ανά λίστα στο «…».
   Link πλέον ?k=κωδικός (κρατιέται στο εικονίδιο Αφετηρίας). Αποστολή: edge function lst-push + pg_cron «lst-push-every-minute».
   Πίνακες: lst_subs (συσκευές), lst_mutes, lst_events (ουρά). Service worker: sw.js. Manifest: manifest.json.
+  v2.2 (2026-11-25) χωρίς ταξινόμηση με σύρσιμο· διαγραμμένα στο τέλος· ξεδιαγραμμένο → τελευταίο από τα αδιάγραφα.
 -->
 <style>
 :root{color-scheme:light;--ink:#2C2C2A;--mut:#888780;--line:rgba(0,0,0,.10);--red:#E24B4A;--sheet:#F1EFE8;--fs:19px}
@@ -183,13 +184,16 @@ function renderList(){
   inp.placeholder="Πρόσθεσε στο "+L.name+"…";
   $("hd").innerHTML=`<button class="ib" id="bk" aria-label="Πίσω">${I.back}</button><button class="ib" id="mn" aria-label="Μενού">${I.dots}</button><h1>${esc(L.name)}</h1><button class="ib" id="go" aria-label="Πάω για ψώνια">${I.cart}</button><button class="ib" id="ck" aria-label="Σβήσε τα διαγραμμένα">${I.check}</button>`;
   $("bk").onclick=()=>history.back();$("mn").onclick=()=>menu(L);$("ck").onclick=()=>clearDone(L.id);$("go").onclick=()=>going(L);
-  const its=listItems(L.id);
+  const all=listItems(L.id),its=[...all.filter(x=>!x.done),...all.filter(x=>x.done)];
   $("main").className="";
-  $("main").innerHTML=its.length?its.map(x=>`<div class="row${x.done?" done":""}" data-id="${esc(x.id)}"><span class="t">${esc(x.text)}</span><span class="hdl" aria-label="Μετακίνηση">${I.hdl}</span></div>`).join(""):`<div class="empty">Η λίστα είναι άδεια. Γράψε κάτι πάνω ή άνοιξε το λεξικό με το ▾.</div>`;
-  $("main").querySelectorAll(".row").forEach(r=>{r.querySelector(".t").onclick=()=>toggle(r.dataset.id);dragify(r.querySelector(".hdl"),r)});
+  $("main").innerHTML=its.length?its.map(x=>`<div class="row${x.done?" done":""}" data-id="${esc(x.id)}"><span class="t">${esc(x.text)}</span></div>`).join(""):`<div class="empty">Η λίστα είναι άδεια. Γράψε κάτι πάνω ή άνοιξε το λεξικό με το ▾.</div>`;
+  $("main").querySelectorAll(".row").forEach(r=>r.onclick=()=>toggle(r.dataset.id));
   renderDict();
 }
-function toggle(id){const x=S.items.find(i=>i.id===id);if(!x)return;x.done=!x.done;render();saveItem(x,"toggle")}
+// διαγραμμένα στο τέλος· όταν ξεδιαγράφεται, πάει τελευταίο από τα αδιάγραφα (ord = max+1)
+function toggle(id){const x=S.items.find(i=>i.id===id);if(!x)return;x.done=!x.done;
+  const pool=listItems(x.list).filter(y=>y!==x&&y.done===x.done);x.ord=pool.reduce((m,y)=>Math.max(m,y.ord),0)+1;
+  render();saveItem(x,"toggle")}
 
 function clearDone(listId){
   const gone=listItems(listId).filter(x=>x.done);if(!gone.length){toast("Δεν υπάρχουν διαγραμμένα.");return}
@@ -251,20 +255,6 @@ function jump(e){const t=document.elementFromPoint(e.clientX,e.clientY);const g=
   if(hit)$("dict").scrollTop=hit.offsetTop}
 $("idx").addEventListener("pointerdown",e=>{e.preventDefault();$("idx").setPointerCapture(e.pointerId);jump(e)});
 $("idx").addEventListener("pointermove",e=>{if(e.buttons||e.pointerType==="touch")jump(e)});
-
-/* ταξινόμηση με σύρσιμο */
-function dragify(h,row){
-  h.onpointerdown=e=>{e.preventDefault();h.setPointerCapture(e.pointerId);S.dragging=true;row.classList.add("drag")};
-  h.onpointermove=e=>{if(!S.dragging)return;const m=$("main");
-    const r=m.getBoundingClientRect();if(e.clientY<r.top+30)m.scrollTop-=8;else if(e.clientY>r.bottom-30)m.scrollTop+=8;
-    for(const o of m.querySelectorAll(".row")){if(o===row)continue;const b=o.getBoundingClientRect();
-      if(e.clientY>b.top&&e.clientY<b.bottom){m.insertBefore(row,e.clientY<b.top+b.height/2?o:o.nextSibling);break}}};
-  const end=()=>{if(!S.dragging)return;S.dragging=false;row.classList.remove("drag");
-    const ids=[...$("main").querySelectorAll(".row")].map(r=>r.dataset.id);const ch=[];
-    ids.forEach((id,i)=>{const x=S.items.find(y=>y.id===id);if(x&&x.ord!==i+1){x.ord=i+1;ch.push(x)}});
-    render();for(const x of ch)saveItem(x,"reorder")};
-  h.onpointerup=end;h.onpointercancel=end;
-}
 
 /* μενού «…» */
 function menu(L){
