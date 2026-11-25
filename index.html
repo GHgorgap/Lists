@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Λίστες">
 <meta name="theme-color" content="#FAEEDA">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
 <!--
 ΧΑΡΤΗΣ ΕΦΑΡΜΟΓΗΣ «Λίστες» (για μελλοντικές αλλαγές)
 Φιλοξενία: GitHub Pages (repo GHgorgap/Lists). Βάση: Supabase project «Constructions App», πίνακες lst_* (ξεχωριστοί).
@@ -20,6 +21,10 @@ Link: https://ghgorgap.github.io/Lists/#<ΜΥΣΤΙΚΟΣ ΚΩΔΙΚΟΣ>. Ο κ
 Συγχρονισμός: lst_state κάθε 3" όταν η εφαρμογή είναι ανοιχτή + αμέσως στο άνοιγμα. Ping κάθε 3 μέρες από GitHub Actions (keepalive.yml).
 Κώδικας: api() κλήσεις · pull() συγχρονισμός · renderHome/renderList/renderDict · dragify ταξινόμηση · menu «…».
 Εκδόσεις: v2.0 (2026-11-24) μεταφορά από claude.ai σε GitHub Pages + Supabase (ίδια λειτουργία με v1.6).
+  v2.1 (2026-11-25) ειδοποιήσεις: «ποιος είμαι» ανά συσκευή (localStorage lst_me), 🔔 στην αρχική, 🛒 «Πάω για ψώνια»,
+  «Τα ψώνια έγιναν» (μετά το ✓, 6,5" για αναίρεση), δέσμη προσθηκών (5' ησυχία ή κλείσιμο εφαρμογής), σίγαση ανά λίστα στο «…».
+  Link πλέον ?k=κωδικός (κρατιέται στο εικονίδιο Αφετηρίας). Αποστολή: edge function lst-push + pg_cron «lst-push-every-minute».
+  Πίνακες: lst_subs (συσκευές), lst_mutes, lst_events (ουρά). Service worker: sw.js. Manifest: manifest.json.
 -->
 <style>
 :root{color-scheme:light;--ink:#2C2C2A;--mut:#888780;--line:rgba(0,0,0,.10);--red:#E24B4A;--sheet:#F1EFE8;--fs:19px}
@@ -95,7 +100,7 @@ const SB_URL="https://yakggyatokcptxjycmew.supabase.co";
 const SB_KEY="sb_publishable_iOLAbYGGAL7Y-JD_3jdT6w_6Ci1_isi";
 const BGS=["#FAEEDA","#FFFFFF","#E1F5EE","#FBEAF0","#E6F1FB","#EAF3DE","#F1EFE8"];
 const GR="ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ".split("");
-const I={back:'<svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>',dots:'<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>',check:'<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>',plus:'<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',hdl:'<svg viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></svg>',down:'<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>'};
+const I={back:'<svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>',dots:'<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>',check:'<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>',plus:'<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',hdl:'<svg viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></svg>',down:'<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>',bell:'<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',cart:'<svg viewBox="0 0 24 24"><path d="M3 4h2l2.4 11h10.2L20 7H6.2"/><circle cx="9" cy="19" r="1.3"/><circle cx="17" cy="19" r="1.3"/></svg>'};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const norm=s=>String(s).normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/ς/g,"σ").replace(/\s+/g," ").trim();
@@ -103,9 +108,20 @@ const uid=()=>crypto.randomUUID?crypto.randomUUID():"10000000-1000-4000-8000-100
 const S={lists:[],items:[],dict:[],cur:null,dragging:false,adding:false,pending:0,loaded:false};
 
 /* μυστικός κωδικός: από το link (#κωδικός) ή από την τελευταία φορά */
-let SPACE=(location.hash||"").replace(/^#/,"").trim();
+const QS=new URLSearchParams(location.search);
+let SPACE=(QS.get("k")||(location.hash||"").replace(/^#/,"")).trim();
+const OPEN_LIST=QS.get("l");
 try{if(SPACE)localStorage.setItem("lst_space",SPACE);else SPACE=localStorage.getItem("lst_space")||""}catch(_){}
-if(SPACE&&!location.hash)history.replaceState(null,"","#"+SPACE);
+const BASE=location.origin+location.pathname;
+const LINK=()=>BASE+"?k="+encodeURIComponent(SPACE);
+if(SPACE)history.replaceState(null,"",LINK());
+/* ποιος είμαι (μία φορά ανά συσκευή) */
+let ME="";try{ME=localStorage.getItem("lst_me")||""}catch(_){}
+const FN_URL="https://yakggyatokcptxjycmew.supabase.co/functions/v1/lst-push";
+const VAPID="BMswXbqqQNqVxac1ZhxZfdRjnU3bBxYQIdoBqOMRKVxE1U3uDEMCP7FUnjCJs3Xmi4n1toz-M10IWHhZyA_hrcw";
+const runPush=()=>fetch(FN_URL,{method:"POST",keepalive:true,headers:{"Content-Type":"application/json"},body:'{"action":"run"}'}).catch(()=>{});
+let unsentAdds=false;
+function ev(list,kind,text,key){if(kind==="add")unsentAdds=true;api("lst_event",{p_list:list,p_who:ME,p_kind:kind,p_text:text||null,p_key:key||null}).then(()=>{if(kind!=="add")runPush()}).catch(e=>logErr("event",e))}
 
 /* κλήσεις στη βάση */
 async function api(fn,args){
@@ -129,22 +145,23 @@ async function pull(){
   if(!SPACE||S.pending||S.dragging)return;
   try{const st=await api("lst_state");if(S.pending||S.dragging)return;
     const n=JSON.stringify(st);S.loaded=true;if(n===sig)return;sig=n;
-    S.lists=st.lists;S.items=st.items;S.dict=st.dict;
+    S.lists=st.lists;S.items=st.items;S.dict=st.dict;S.mutes=st.mutes||[];if(OPEN_LIST&&!S.openedOnce){S.openedOnce=true;if(S.lists.find(l=>l.id===OPEN_LIST)){S.cur=OPEN_LIST;history.pushState({l:OPEN_LIST},"",LINK())}}
     if(S.cur&&!S.lists.find(l=>l.id===S.cur))S.cur=null;render();
   }catch(e){if(!S.loaded){$("main").innerHTML=`<div class="empty">${e.status===400?"Ο κωδικός στο link δεν είναι σωστός. Άνοιξε ξανά το link που σου στάλθηκε.":"Δεν απαντά η βάση. Έλεγξε τη σύνδεση."}</div>`}}
 }
 setInterval(()=>{if(!document.hidden)pull()},3000);
-document.addEventListener("visibilitychange",()=>{if(!document.hidden)pull()});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden){pull();return}
+  if(unsentAdds&&SPACE){unsentAdds=false;fetch(SB_URL+"/rest/v1/rpc/lst_flush",{method:"POST",keepalive:true,headers:{"apikey":SB_KEY,"Content-Type":"application/json"},body:JSON.stringify({p_space:SPACE,p_who:ME})}).then(runPush).catch(()=>{})}});
 addEventListener("focus",pull);
 
-function open(id){S.cur=id;history.pushState({l:id},"","#"+SPACE);render();$("main").scrollTop=0}
+function open(id){S.cur=id;history.pushState({l:id},"",LINK());render();$("main").scrollTop=0}
 addEventListener("popstate",()=>{if(S.cur){S.cur=null;render()}});
 function render(){if(S.dragging)return;S.cur?renderList():renderHome()}
 
 function renderHome(){
   document.body.style.background="#fff";$("app").style.background="#fff";$("sheet").style.display="none";if($("sheet").classList.contains("open"))setOpen(false);
-  $("hd").innerHTML=`<span class="ib"></span><h1>Λίστες</h1><button class="ib" id="addL" aria-label="Νέα λίστα">${I.plus}</button>`;
-  $("addL").onclick=()=>{S.adding=true;renderHome();$("newL").focus()};
+  $("hd").innerHTML=`<button class="ib" id="bell" aria-label="Ειδοποιήσεις">${I.bell}</button><h1>Λίστες</h1><button class="ib" id="addL" aria-label="Νέα λίστα">${I.plus}</button>`;
+  $("addL").onclick=()=>{S.adding=true;renderHome();$("newL").focus()};$("bell").onclick=notifPanel;
   const ls=[...S.lists].sort((a,b)=>a.ord-b.ord);
   let h=S.adding?`<div class="row" style="padding:8px"><input id="newL" class="inp" style="background:#F1EFE8" placeholder="Όνομα λίστας, π.χ. Ψώνια ΑΒ" enterkeyhint="done"></div>`:"";
   h+=ls.map(l=>`<div class="row" data-id="${esc(l.id)}"><span class="sw" style="background:${esc(l.bg||BGS[0])}"></span><span class="t">${esc(l.name)}</span><span class="cnt">${listItems(l.id).filter(x=>!x.done).length}</span></div>`).join("");
@@ -164,8 +181,8 @@ function renderList(){
   const L=S.lists.find(l=>l.id===S.cur);if(!L){S.cur=null;renderHome();return}
   document.body.style.background=L.bg||BGS[0];$("app").style.background=L.bg||BGS[0];$("sheet").style.display="";
   inp.placeholder="Πρόσθεσε στο "+L.name+"…";
-  $("hd").innerHTML=`<button class="ib" id="bk" aria-label="Πίσω">${I.back}</button><button class="ib" id="mn" aria-label="Μενού">${I.dots}</button><h1>${esc(L.name)}</h1><span class="ib"></span><button class="ib" id="ck" aria-label="Σβήσε τα διαγραμμένα">${I.check}</button>`;
-  $("bk").onclick=()=>history.back();$("mn").onclick=()=>menu(L);$("ck").onclick=()=>clearDone(L.id);
+  $("hd").innerHTML=`<button class="ib" id="bk" aria-label="Πίσω">${I.back}</button><button class="ib" id="mn" aria-label="Μενού">${I.dots}</button><h1>${esc(L.name)}</h1><button class="ib" id="go" aria-label="Πάω για ψώνια">${I.cart}</button><button class="ib" id="ck" aria-label="Σβήσε τα διαγραμμένα">${I.check}</button>`;
+  $("bk").onclick=()=>history.back();$("mn").onclick=()=>menu(L);$("ck").onclick=()=>clearDone(L.id);$("go").onclick=()=>going(L);
   const its=listItems(L.id);
   $("main").className="";
   $("main").innerHTML=its.length?its.map(x=>`<div class="row${x.done?" done":""}" data-id="${esc(x.id)}"><span class="t">${esc(x.text)}</span><span class="hdl" aria-label="Μετακίνηση">${I.hdl}</span></div>`).join(""):`<div class="empty">Η λίστα είναι άδεια. Γράψε κάτι πάνω ή άνοιξε το λεξικό με το ▾.</div>`;
@@ -178,14 +195,16 @@ function clearDone(listId){
   const gone=listItems(listId).filter(x=>x.done);if(!gone.length){toast("Δεν υπάρχουν διαγραμμένα.");return}
   S.items=S.items.filter(x=>!gone.includes(x));render();
   W("clearDone","lst_item_delete",{p_ids:gone.map(x=>x.id)});
-  toast(`Σβήστηκαν ${gone.length}`,()=>{for(const x of gone){S.items.push(x);saveItem(x,"undoClear")}render()});
+  let undone=false;
+  toast(`Σβήστηκαν ${gone.length}`,()=>{undone=true;for(const x of gone){S.items.push(x);saveItem(x,"undoClear")}render()});
+  setTimeout(()=>{if(!undone)ev(listId,"cleared",gone.length===1?"1 είδος":gone.length+" είδη")},6500);
 }
 
 function addItem(text){
   text=text.trim();if(!text||!S.cur)return;text=text.charAt(0).toLocaleUpperCase("el")+text.slice(1);const key=norm(text);const L=S.cur;
   const ex=listItems(L).find(x=>x.key===key);
-  if(ex){if(ex.done)toggle(ex.id);else toast("Υπάρχει ήδη στη λίστα.")}
-  else{const x={id:uid(),list:L,text,key,done:false,ord:listItems(L).reduce((m,y)=>Math.max(m,y.ord),0)+1};S.items.push(x);saveItem(x,"addItem")}
+  if(ex){if(ex.done){toggle(ex.id);ev(L,"add",ex.text,key)}else toast("Υπάρχει ήδη στη λίστα.")}
+  else{const x={id:uid(),list:L,text,key,done:false,ord:listItems(L).reduce((m,y)=>Math.max(m,y.ord),0)+1};S.items.push(x);saveItem(x,"addItem");ev(L,"add",text,key)}
   if(!S.dict.find(d=>d.list===L&&d.key===key)){S.dict.push({list:L,key,text});W("addDict","lst_dict_save",{p_list:L,p_key:key,p_text:text})}
   render();
 }
@@ -251,15 +270,18 @@ function dragify(h,row){
 function menu(L){
   const p=$("panel");
   p.innerHTML=`<div class="mi" id="m1">Μετονομασία</div><div class="mi" style="border:0;padding-bottom:6px">Φόντο</div><div class="cols">${BGS.map(c=>`<span class="col${c===(L.bg||BGS[0])?" on":""}" data-c="${c}" style="background:${c}"></span>`).join("")}</div>
-  <div class="mi" id="m2" style="border-top:.5px solid #eee">Κοινή χρήση</div><div class="mi red" id="m3">Διαγραφή λίστας</div><div class="mi" id="m0" style="justify-content:center;color:#5F5E5A">Κλείσιμο</div>`;
+  <div class="mi" id="m4" style="border-top:.5px solid #eee;justify-content:space-between">Ειδοποιήσεις για αυτή τη λίστα <b id="m4v" style="font-weight:600">${muted(L.id)?"Όχι":"Ναι"}</b></div><div class="mi" id="m2">Κοινή χρήση</div><div class="mi red" id="m3">Διαγραφή λίστας</div><div class="mi" id="m0" style="justify-content:center;color:#5F5E5A">Κλείσιμο</div>`;
   $("ov").classList.add("on");
   p.querySelectorAll(".col").forEach(c=>c.onclick=()=>{L.bg=c.dataset.c;close();render();saveList(L)});
   $("m0").onclick=close;
+  $("m4").onclick=()=>{if(!ME){close();whoPanel(()=>menu(L));return}const m=!muted(L.id);
+    S.mutes=m?[...S.mutes,{who:ME,list:L.id}]:S.mutes.filter(x=>!(x.who===ME&&x.list===L.id));$("m4v").textContent=m?"Όχι":"Ναι";
+    W("mute","lst_mute_set",{p_who:ME,p_list:L.id,p_muted:m})};
   $("m1").onclick=()=>{p.innerHTML=`<div class="note">Νέο όνομα</div><div style="padding:0 14px"><input id="rn" class="inp" style="background:#F1EFE8"></div><div class="btns"><button class="btn" id="c0">Άκυρο</button><button class="btn pri" id="c1">Αποθήκευση</button></div>`;
     const rn=$("rn");rn.value=L.name;rn.focus();rn.select();$("c0").onclick=close;
     const ok=()=>{const v=rn.value.trim();close();if(v&&v!==L.name){L.name=v;render();saveList(L)}};
     $("c1").onclick=ok;rn.onkeydown=e=>{if(e.key==="Enter")ok()}};
-  $("m2").onclick=()=>{const link=location.origin+location.pathname+"#"+SPACE;
+  $("m2").onclick=()=>{const link=LINK();
     p.innerHTML=`<div class="note">Στείλε αυτό το link στην Ελίζα. Όποιος έχει το link βλέπει και γράφει σε όλες τις λίστες.</div><div style="padding:0 14px"><input class="inp" id="lk" readonly style="background:#F1EFE8;font-size:14px"></div><div class="btns"><button class="btn" id="c0">Κλείσιμο</button><button class="btn pri" id="c1">${navigator.share?"Αποστολή":"Αντιγραφή"}</button></div>`;
     $("lk").value=link;$("c0").onclick=close;
     $("c1").onclick=async()=>{try{if(navigator.share)await navigator.share({title:"Λίστες",url:link});else{await navigator.clipboard.writeText(link);toast("Αντιγράφηκε")}}catch(_){ $("lk").select() }}};
@@ -269,9 +291,57 @@ function menu(L){
 function close(){$("ov").classList.remove("on")}
 $("ov").onclick=e=>{if(e.target===$("ov"))close()};
 
+/* ειδοποιήσεις */
+S.mutes=[];
+const muted=id=>!!ME&&S.mutes.some(m=>m.who===ME&&m.list===id);
+const pushOK=()=>"serviceWorker" in navigator&&"PushManager" in window&&"Notification" in window;
+const isIOS=/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+const standalone=()=>navigator.standalone===true||matchMedia("(display-mode: standalone)").matches;
+let swReg=null;
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").then(r=>{swReg=r}).catch(e=>logErr("sw",e));
+const b64=s=>{const p="=".repeat((4-s.length%4)%4),b=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...b].map(c=>c.charCodeAt(0)))};
+async function currentSub(){try{const r=swReg||await navigator.serviceWorker.ready;return await r.pushManager.getSubscription()}catch(_){return null}}
+function whoPanel(after){
+  const p=$("panel");
+  p.innerHTML=`<div class="note">Ποιος χρησιμοποιεί αυτό το κινητό; Χρειάζεται για να μην παίρνεις ειδοποιήσεις για όσα προσθέτεις εσύ.</div>
+  <div style="padding:0 14px"><select id="wsel" class="inp" style="background:#F1EFE8"><option value="Γιώργος">Γιώργος</option><option value="Ελίζα">Ελίζα</option><option value="*">Άλλος…</option></select>
+  <input id="wtxt" class="inp" style="background:#F1EFE8;margin-top:8px;display:none" placeholder="Όνομα"></div>
+  <div class="btns"><button class="btn pri" id="c1">Αποθήκευση</button></div>`;
+  $("ov").classList.add("on");
+  const sel=$("wsel"),tx=$("wtxt");if(ME){if([...sel.options].some(o=>o.value===ME))sel.value=ME;else{sel.value="*";tx.style.display="";tx.value=ME}}
+  sel.onchange=()=>{tx.style.display=sel.value==="*"?"":"none";if(sel.value==="*")tx.focus()};
+  $("c1").onclick=async()=>{const v=(sel.value==="*"?tx.value:sel.value).trim();if(!v){tx.focus();return}
+    ME=v;try{localStorage.setItem("lst_me",v)}catch(_){}close();
+    const s=await currentSub();if(s)W("who","lst_sub_who",{p_endpoint:s.endpoint,p_who:ME});after&&after()};
+}
+async function notifPanel(){
+  if(!ME){whoPanel(notifPanel);return}
+  const p=$("panel");const s=pushOK()?await currentSub():null;
+  let body;
+  if(!pushOK()||(isIOS&&!standalone()))body=`<div class="note">${isIOS?"Στο iPhone οι ειδοποιήσεις δουλεύουν μόνο όταν ανοίγεις την εφαρμογή από το εικονίδιο της οθόνης Αφετηρίας.<br><br>Safari → Κοινοποίηση → «Προσθήκη στην οθόνη Αφετηρίας», και άνοιξέ την από εκεί.":"Αυτός ο browser δεν υποστηρίζει ειδοποιήσεις."}</div>`;
+  else if(s)body=`<div class="note">Οι ειδοποιήσεις είναι <b>ενεργές</b> σε αυτή τη συσκευή.</div><div class="btns"><button class="btn" id="nt">Δοκιμή</button><button class="btn" id="noff">Απενεργοποίηση</button></div>`;
+  else body=`<div class="note">Θα παίρνεις ειδοποίηση όταν κάποιος άλλος προσθέτει είδη (μία για όλα μαζί), πάει για ψώνια ή τελειώνει τα ψώνια.</div><div class="btns"><button class="btn pri" id="non">Ενεργοποίηση</button></div>`;
+  p.innerHTML=`<div class="mi" id="nw" style="justify-content:space-between">Είμαι <b style="font-weight:600">${esc(ME)}</b></div>${body}<div class="mi" id="m0" style="justify-content:center;color:#5F5E5A;border-top:.5px solid #eee">Κλείσιμο</div>`;
+  $("ov").classList.add("on");$("m0").onclick=close;$("nw").onclick=()=>whoPanel(notifPanel);
+  if($("non"))$("non").onclick=async()=>{try{
+      const perm=await Notification.requestPermission();if(perm!=="granted"){toast("Δεν δόθηκε άδεια για ειδοποιήσεις.");return}
+      const r=swReg||await navigator.serviceWorker.ready;
+      const sub=await r.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64(VAPID)});
+      const j=sub.toJSON();await api("lst_sub_save",{p_who:ME,p_endpoint:j.endpoint,p_p256dh:j.keys.p256dh,p_auth:j.keys.auth});
+      toast("Οι ειδοποιήσεις ενεργοποιήθηκαν");notifPanel();
+    }catch(e){logErr("subscribe",e)}};
+  if($("nt"))$("nt").onclick=async()=>{const r=await fetch(FN_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"test",space:SPACE,endpoint:s.endpoint})}).catch(()=>null);toast(r&&r.ok?"Στάλθηκε δοκιμαστική ειδοποίηση":"Η δοκιμή απέτυχε")};
+  if($("noff"))$("noff").onclick=async()=>{try{await s.unsubscribe()}catch(_){}toast("Οι ειδοποιήσεις απενεργοποιήθηκαν");notifPanel()};
+}
+function going(L){
+  if(!ME){whoPanel(()=>going(L));return}
+  $("panel").innerHTML=`<div class="note">Να ειδοποιηθούν οι άλλοι ότι πας για ψώνια («${esc(L.name)}»), ώστε να προσθέσουν ό,τι χρειάζονται;</div><div class="btns"><button class="btn" id="c0">Άκυρο</button><button class="btn pri" id="c1">Ειδοποίηση</button></div>`;
+  $("ov").classList.add("on");$("c0").onclick=close;$("c1").onclick=()=>{close();ev(L.id,"going");toast("Ειδοποιήθηκαν")};
+}
+
 /* έναρξη */
 if(!SPACE){$("hd").innerHTML=`<span class="ib"></span><h1>Λίστες</h1><span class="ib"></span>`;$("main").innerHTML=`<div class="empty">Άνοιξε την εφαρμογή από το link που σου στάλθηκε.</div>`}
-else{renderHome();pull()}
+else{renderHome();pull();if(!ME)setTimeout(()=>whoPanel(),600)}
 }
 </script>
 </body>
